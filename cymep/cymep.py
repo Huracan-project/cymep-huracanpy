@@ -373,45 +373,41 @@ def generate_diagnostics(configs):
 
 
 def get_storm_data(tracks, define_mi_by_pressure):
-    track_groups = tracks.groupby("track_id")
-
     origin = tracks.hrcn.get_gen_vals()
     origin_vars = {key: f"genesis_{key}" for key in ["lon", "lat", "time"]}
     storm_data = origin[origin_vars.keys()].rename(**origin_vars)
 
     # Calculate LMI
-    if define_mi_by_pressure:
-        locMI = track_groups.map(lambda x: x.isel(record=x.slp.argmin()))
-    else:
-        locMI = track_groups.map(lambda x: x.isel(record=x.wind.argmax()))
+    apex_slp = tracks.hrcn.get_apex_vals("slp", stat="min")
+    apex_wind = tracks.hrcn.get_apex_vals("wind", stat="max")
 
-    storm_data["maximum_intensity_lon"] = locMI.lon
-    storm_data["maximum_intensity_lat"] = locMI.lat
+    if define_mi_by_pressure:
+        lmi = apex_slp
+    else:
+        lmi = apex_wind
+
+    storm_data["maximum_intensity_lon"] = lmi.lon
+    storm_data["maximum_intensity_lat"] = lmi.lat
 
     # Flip LMI sign in SH to report poleward values when averaging
-    abs_lats = True
-    if abs_lats:
-        storm_data["maximum_intensity_lat"] = np.abs(locMI.lat)
+    storm_data["maximum_intensity_lat"] = np.abs(lmi.lat)
 
     # Calculate storm-accumulated ACE and PACE
-    storm_data["accumulated_cyclone_energy"] = track_groups.map(lambda x: x.ace.sum())
-    storm_data["pressure_accumulated_cyclone_energy"] = track_groups.map(
-        lambda x: x.pace.sum()
-    )
+    track_groups = tracks[["track_id", "ace", "pace"]].groupby("track_id")
+    track_sums = track_groups.sum()
+    storm_data["accumulated_cyclone_energy"] = track_sums.ace
+    storm_data["pressure_accumulated_cyclone_energy"] = track_sums.pace
 
     # Get maximum intensity and TCD
-    storm_data["minimum_pressure"] = track_groups.map(lambda x: x.slp.min())
-    storm_data["maximum_wind"] = track_groups.map(lambda x: x.wind.max())
+    storm_data["minimum_pressure"] = apex_slp.slp
+    storm_data["maximum_wind"] = apex_wind.wind
 
     # Currently assuming 6-hourly timesteps
     # Taking "last - first" doesn't work due to gaps in data
     # storm_data["total_cyclone_days"] = track_groups.map(
     #     lambda x: ((x.time.max() - x.time.min()) / np.timedelta64(1, "D")
     # )
-    storm_data["total_cyclone_days"] = (
-        "track_id",
-        np.array([0.25 * len(track.time) for track_id, track in track_groups]),
-    )
+    storm_data["total_cyclone_days"] = track_groups.count().ace * 0.25
 
     return storm_data
 
