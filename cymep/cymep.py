@@ -274,6 +274,7 @@ def generate_diagnostics(configs):
                     denslat,
                     denslon,
                     tracks.ace.data,
+                    trackdens,
                     False,
                     0,
                 )
@@ -287,6 +288,7 @@ def generate_diagnostics(configs):
                     denslat,
                     denslon,
                     tracks.pace.data,
+                    trackdens,
                     False,
                     0,
                 )
@@ -299,7 +301,7 @@ def generate_diagnostics(configs):
                 denslat,
                 denslon,
                 tracks.slp.data,
-                min,
+                "min",
             )
             maxwind = track_minmax(
                 tracks.lat.data,
@@ -307,7 +309,7 @@ def generate_diagnostics(configs):
                 denslat,
                 denslon,
                 tracks.wind.data,
-                max,
+                "max",
             )
 
             # Store this dataset's data in the master spatial array

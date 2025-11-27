@@ -3,6 +3,7 @@ import warnings
 import shapely
 from shapely.affinity import translate
 import numpy as np
+import numba
 
 from huracanpy import basins
 
@@ -83,28 +84,8 @@ def track_density(clat, clon, glat, glon, setzeros):
     return countarr
 
 
-def track_mean(clat, clon, glat, glon, cvar, meanornot, minhits):
-    npoints = len(clat)
-    out_of_bounds = (
-        (clon < glon[0]) | (clon >= glon[-1]) | (clat < glat[0]) | (clat >= glat[-1])
-    )
-
-    clon = clon[~out_of_bounds]
-    clat = clat[~out_of_bounds]
-    cvar = cvar[~out_of_bounds]
-
-    print(f"Track mean. Removed {npoints - len(clon)} points out of {npoints}")
-
-    xidx = np.digitize(clon, glon) - 1
-    yidx = np.digitize(clat, glat) - 1
-
-    countarr = np.zeros((len(glat) - 1, len(glon) - 1))
-    cumulative = np.zeros((len(glat) - 1, len(glon) - 1))
-
-    # =================== Count data ==================================
-    for nn, (jl, il) in enumerate(zip(yidx, xidx)):
-        countarr[jl, il] = countarr[jl, il] + 1
-        cumulative[jl, il] = cumulative[jl, il] + cvar[nn]
+def track_mean(clat, clon, glat, glon, cvar, countarr, meanornot, minhits):
+    cumulative, y, x = np.histogram2d(clat, clon, bins=[glat, glon], weights=cvar)
 
     # set to nan if cumulative less than the specified number of min hits
     cumulative = np.where(countarr < minhits, np.nan, cumulative)
@@ -135,15 +116,28 @@ def track_minmax(clat, clon, glat, glon, cvar, statistic):
     xidx = np.digitize(clon, glon) - 1
     yidx = np.digitize(clat, glat) - 1
 
+    # =================== Count data ==================================
     countarr = np.full((len(glat) - 1, len(glon) - 1), np.nan)
 
-    # =================== Count data ==================================
-    for nn, (jl, il) in enumerate(zip(yidx, xidx)):
-        if np.isnan(countarr[jl, il]):
-            countarr[jl, il] = cvar[nn]
-        else:
-            countarr[jl, il] = statistic(countarr[jl, il], cvar[nn])
+    if statistic == "min":
+        track_min(xidx, yidx, cvar, countarr)
+    elif statistic == "max":
+        track_max(xidx, yidx, cvar, countarr)
+    else:
+        raise ValueError(f"Statistic {statistic} not supported")
 
     print(f"count: min={np.nanmin(countarr)}  max={np.nanmax(countarr)}")
 
     return countarr
+
+
+@numba.njit()
+def track_min(xidx, yidx, cvar, countarr):
+    for n in range(len(cvar)):
+        countarr[yidx[n], xidx[n]] = np.nanmin([countarr[yidx[n], xidx[n]], cvar[n]])
+
+
+@numba.njit()
+def track_max(xidx, yidx, cvar, countarr):
+    for n in range(len(cvar)):
+        countarr[yidx[n], xidx[n]] = np.nanmax([countarr[yidx[n], xidx[n]], cvar[n]])
