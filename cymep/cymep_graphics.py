@@ -3,6 +3,7 @@ import pathlib
 import yaml
 
 from cartopy.crs import EqualEarth, PlateCarree
+import huracanpy
 from huracanpy import basins
 import matplotlib
 import matplotlib.pyplot as plt
@@ -11,6 +12,8 @@ from tqdm import tqdm
 import xarray as xr
 
 transform = PlateCarree()
+
+markers = ["o", "v", "s", "p", "P", "*", "h", "d"]
 
 
 def generate_plots(configs):
@@ -30,8 +33,8 @@ def generate_plots(configs):
     projection = EqualEarth(central_longitude=ds.lon.values.mean())
 
     # Determine layout for groups of maps
-    nsubplots = len(ds.dataset.values)
-    nrows, ncols = optimum_layout(nsubplots)
+    ndatasets = len(ds.dataset.values)
+    nrows, ncols = optimum_layout(ndatasets)
 
     for var in tqdm(ds):
         if "py_" in var or "pm_" in var:
@@ -147,6 +150,43 @@ def generate_plots(configs):
 
     # TODO - Taylor diagram
 
+    # Storm data plots
+    storms = {
+        dataset: xr.open_dataset(path / f"storms_{filename}_{dataset}.nc")
+        for dataset in configs["datasets"]
+    }
+    x_category = np.arange(-1.25, 5.25+1)
+    dx = 0.5 / ndatasets
+
+    category_plot(
+        storms, "maximum_wind", huracanpy.tc.saffir_simpson_category, x_category, dx
+    )
+    plt.xlabel("Saffir-Simpson Category")
+    plt.ylabel("# of Storms")
+    plt.legend(ncol=ncols)
+
+    plt.savefig(plot_path / f"categories_{filename}.png")
+
+    category_plot(
+        storms, "minimum_pressure", huracanpy.tc.pressure_category, x_category, dx
+    )
+    plt.xlabel("Pressure Category")
+    plt.ylabel("# of Storms")
+    plt.legend(ncol=ncols)
+
+    plt.savefig(plot_path / f"categories_pressure_{filename}.png")
+
+
+def category_plot(storms, var, function, x_bins, dx):
+    fig = plt.figure()
+    for n, dataset in enumerate(storms):
+        category = function(storms[dataset][var])
+        counts, bin_edges = np.histogram(category, bins=x_bins)
+
+        plt.bar(x_bins[:-1] + n * dx, counts, width=dx, label=dataset)
+
+    return fig
+
 
 def correlation_table(ds, cmap="viridis", reference=None):
     fig = plt.figure()
@@ -221,6 +261,49 @@ def optimum_layout(nsubplots):
 def _factors(y):
     return [(x, y // x) for x in range(1, int(np.floor(np.sqrt(y))) + 1) if y % x == 0]
 
+
+def taylor_plot(correlation, standard_deviation, labels):
+    """
+
+    https://matplotlib.org/stable/gallery/pie_and_polar_charts/polar_demo.html
+    """
+    ax = taylor_axes()
+    angle = correlation * 0.5 * np.pi
+
+    for n in range(len(angle)):
+        ax.plot(
+            angle[n],
+            standard_deviation[n],
+            linestyle="",
+            color=f"C{n%10}",
+            marker=markers[n % len(markers)],
+            label=labels[n],
+        )
+
+    # y-limit based on data
+    # Uniform around 1 to nearest 0.1 that encloses all data
+    dy = np.abs(standard_deviation - standard_deviation[0]).max()
+    dy = np.ceil(dy * 10) / 10
+    ax.set_rlabel_position(0)
+    ax.set_rlim([1 - dy, 1 + dy])
+
+    ax.text(0.25 * np.pi, 1.1 + dy, "Correlation", rotation=-45)
+
+    return ax
+
+
+def taylor_axes():
+    ax = plt.axes(projection="polar")
+
+    ax.set_theta_direction(-1)
+    ax.set_theta_zero_location("N")
+    ax.set_thetalim(0, 0.5 * np.pi)
+
+    correlation_ticks = np.arange(0, 1.1, 0.1)
+    ax.set_xticks(correlation_ticks * 0.5 * np.pi)
+    ax.set_xticklabels([f"{x:.1f}" for x in correlation_ticks])
+
+    return ax
 
 def main():
     parser = ArgumentParser()
